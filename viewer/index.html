@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MRI Viewer</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: #0b0c0e; color: #d8dbe0; font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; display: flex; }
+  aside { width: 230px; flex: none; border-right: 1px solid #23262b; padding: 16px 12px; overflow-y: auto; }
+  h1 { font-size: 15px; margin: 0 0 2px; }
+  .sub { color: #8b919a; font-size: 12px; margin-bottom: 16px; }
+  button.series { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; background: none; border: 1px solid transparent; color: inherit; font: inherit; padding: 6px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; }
+  button.series:hover { background: #16181c; }
+  button.series[aria-pressed="true"] { background: #1b1f25; border-color: #3b82f6; }
+  button.series img { width: 56px; height: 56px; object-fit: cover; border-radius: 4px; background: #000; flex: none; }
+  button.series small { display: block; color: #8b919a; }
+  .help { color: #8b919a; font-size: 12px; margin-top: 18px; border-top: 1px solid #23262b; padding-top: 12px; }
+  kbd { background: #1b1f25; border: 1px solid #2c3037; border-radius: 4px; padding: 0 4px; font: 11px ui-monospace, Menlo, monospace; }
+  main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #stage { flex: 1; min-height: 0; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; cursor: ns-resize; }
+  #img { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; transform-origin: center; }
+  #label { position: absolute; top: 10px; left: 12px; font: 12px ui-monospace, Menlo, monospace; color: #e6c95a; text-shadow: 0 0 3px #000; pointer-events: none; white-space: pre; }
+  footer { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-top: 1px solid #23262b; }
+  footer input[type=range] { flex: 1; }
+  footer label { color: #8b919a; font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  footer input.adj { width: 90px; flex: none; }
+  footer button { background: #1b1f25; color: inherit; border: 1px solid #2c3037; border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; }
+  #count { font-variant-numeric: tabular-nums; min-width: 60px; text-align: right; }
+  @media (max-width: 700px) { body { flex-direction: column; } aside { width: auto; display: flex; gap: 6px; overflow-x: auto; border-right: 0; border-bottom: 1px solid #23262b; padding: 8px; } aside > div, .help { display: none; } button.series { width: auto; flex: none; margin: 0; } footer { flex-wrap: wrap; } }
+</style>
+</head>
+<body>
+<aside>
+  <div><h1 id="title">MRI</h1><div class="sub" id="sub"></div></div>
+  <nav id="list"></nav>
+  <div class="help">
+    Scroll or drag up/down on the image, or use <kbd>↑</kbd> <kbd>↓</kbd>, to move through slices.<br>
+    <kbd>←</kbd> <kbd>→</kbd> switch series. <kbd>R</kbd> resets brightness, contrast and zoom.
+  </div>
+</aside>
+<main>
+  <div id="stage"><img id="img" alt="MRI slice"><div id="label"></div></div>
+  <footer>
+    <input type="range" id="slider" min="1" value="1" aria-label="Slice">
+    <span id="count"></span>
+    <label>Brightness <input class="adj" type="range" id="bri" min="40" max="250" value="100"></label>
+    <label>Contrast <input class="adj" type="range" id="con" min="40" max="250" value="100"></label>
+    <label>Zoom <input class="adj" type="range" id="zoom" min="100" max="400" value="100"></label>
+    <button id="reset">Reset</button>
+  </footer>
+</main>
+<script src="data.js"></script>
+<script>
+(function () {
+  var S = window.STUDY, series = S.series, cur = 0, pos = series.map(function (s) { return Math.floor(s.files.length / 2); });
+  var $ = function (id) { return document.getElementById(id); };
+  var img = $("img"), slider = $("slider"), list = $("list");
+  var d = S.date;
+  $("title").textContent = S.study || "MRI";
+  $("sub").textContent = [d ? d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6, 8) : "", S.site].filter(Boolean).join(" · ");
+
+  series.forEach(function (s, i) {
+    var b = document.createElement("button");
+    b.className = "series";
+    var t = document.createElement("img");
+    t.src = s.files[Math.floor(s.files.length / 2)];
+    t.alt = "";
+    var span = document.createElement("span");
+    span.textContent = s.desc;
+    var sm = document.createElement("small");
+    sm.textContent = s.files.length + " slices";
+    span.appendChild(sm);
+    b.appendChild(t); b.appendChild(span);
+    b.onclick = function () { select(i); };
+    list.appendChild(b);
+    // preload so scrolling is instant
+    s.files.forEach(function (f) { new Image().src = f; });
+  });
+
+  function show() {
+    var s = series[cur], i = pos[cur];
+    img.src = s.files[i];
+    slider.max = s.files.length;
+    slider.value = i + 1;
+    $("count").textContent = (i + 1) + " / " + s.files.length;
+    $("label").textContent = s.desc + "\n" + s.cols + "×" + s.rows + (s.thk ? "  ·  " + s.thk + " mm slices" : "");
+  }
+  function select(i) {
+    cur = (i + series.length) % series.length;
+    [].forEach.call(list.children, function (b, j) { b.setAttribute("aria-pressed", j === cur); });
+    show();
+  }
+  function step(n) {
+    var s = series[cur];
+    pos[cur] = Math.max(0, Math.min(s.files.length - 1, pos[cur] + n));
+    show();
+  }
+  function adjust() {
+    img.style.filter = "brightness(" + $("bri").value + "%) contrast(" + $("con").value + "%)";
+    img.style.transform = "scale(" + $("zoom").value / 100 + ")";
+  }
+  function reset() { $("bri").value = 100; $("con").value = 100; $("zoom").value = 100; adjust(); }
+
+  slider.oninput = function () { pos[cur] = slider.value - 1; show(); };
+  $("bri").oninput = $("con").oninput = $("zoom").oninput = adjust;
+  $("reset").onclick = reset;
+
+  var acc = 0;
+  $("stage").addEventListener("wheel", function (e) {
+    e.preventDefault();
+    acc += e.deltaY;
+    while (Math.abs(acc) >= 30) { step(acc > 0 ? 1 : -1); acc -= acc > 0 ? 30 : -30; }
+  }, { passive: false });
+
+  var dragY = null;
+  $("stage").addEventListener("pointerdown", function (e) { dragY = e.clientY; $("stage").setPointerCapture(e.pointerId); });
+  $("stage").addEventListener("pointermove", function (e) {
+    if (dragY === null) return;
+    var dy = e.clientY - dragY;
+    if (Math.abs(dy) >= 12) { step(dy > 0 ? 1 : -1); dragY = e.clientY; }
+  });
+  $("stage").addEventListener("pointerup", function () { dragY = null; });
+  $("stage").addEventListener("pointercancel", function () { dragY = null; });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.target.tagName === "INPUT") return;
+    if (e.key === "ArrowDown") step(1);
+    else if (e.key === "ArrowUp") step(-1);
+    else if (e.key === "ArrowRight") select(cur + 1);
+    else if (e.key === "ArrowLeft") select(cur - 1);
+    else if (e.key === "r" || e.key === "R") reset();
+    else return;
+    e.preventDefault();
+  });
+
+  // start on the T2 sagittal series if present; it is the usual overview for a spine study
+  var start = series.findIndex(function (s) { return /t2.*sag/i.test(s.desc); });
+  select(start < 0 ? 0 : start);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spine 3D Model</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body { background: #0b0c0e; color: #d8dbe0; font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+  canvas { display: block; touch-action: none; }
+  #panel { position: fixed; top: 12px; left: 12px; width: 200px; max-height: calc(100% - 24px); overflow-y: auto; background: rgba(18, 20, 24, .88); border: 1px solid #2c3037; border-radius: 10px; padding: 12px; }
+  h1 { font-size: 15px; margin: 0 0 2px; }
+  .sub { color: #8b919a; font-size: 12px; margin-bottom: 10px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #8b919a; margin: 12px 0 4px; }
+  label { display: flex; align-items: center; gap: 8px; padding: 2px 0; cursor: pointer; }
+  label i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .views { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  button { background: #1b1f25; color: inherit; border: 1px solid #2c3037; border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+  button:hover { border-color: #3b82f6; }
+  #tip { position: fixed; pointer-events: none; background: #1b1f25; border: 1px solid #2c3037; border-radius: 6px; padding: 2px 8px; font-size: 12px; display: none; }
+  #note { position: fixed; right: 12px; bottom: 10px; max-width: 340px; color: #8b919a; font-size: 11px; text-align: right; }
+  @media (max-width: 600px) { #panel { width: 150px; font-size: 12px; } #note { display: none; } }
+</style>
+</head>
+<body>
+<div id="panel">
+  <h1>Spine 3D model</h1>
+  <div class="sub">From T2 sagittal MRI, 2026-09-29</div>
+  <div class="views">
+    <button data-v="front">Front</button><button data-v="back">Back</button>
+    <button data-v="left">Left</button><button data-v="right">Right</button>
+  </div>
+  <div id="groups"></div>
+</div>
+<div id="tip"></div>
+<div id="note">Drag to rotate, scroll to zoom, right-drag to pan. Approximate reconstruction from 6.3&nbsp;mm-spaced slices; not for diagnosis or measurement.</div>
+<script src="three.min.js"></script>
+<script src="OrbitControls.js"></script>
+<script src="model.js"></script>
+<script>
+(function () {
+  var scene = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 1, 5000);
+  var renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setClearColor(0x0b0c0e);
+  document.body.appendChild(renderer.domElement);
+  var controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x30343c, 0.75));
+  var key = new THREE.DirectionalLight(0xffffff, 0.7);
+  camera.add(key); key.position.set(-150, 200, 100); scene.add(camera);
+
+  // scan coordinates are x = patient left, y = back, z = head; rotate so the head is up and the front faces +z
+  var root = new THREE.Group();
+  root.rotation.x = -Math.PI / 2;
+  scene.add(root);
+
+  function bytes(b64) {
+    var s = atob(b64), a = new Uint8Array(s.length);
+    for (var i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
+    return a.buffer;
+  }
+  var titles = { bone: "Bones", disc: "Discs", canal: "Spinal canal" }, boxes = {}, meshes = [];
+  window.MODEL.forEach(function (p) {
+    var g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(bytes(p.pos)), 3));
+    g.setIndex(new THREE.BufferAttribute(new Uint32Array(bytes(p.idx)), 1));
+    g.computeVertexNormals();
+    var mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.65, metalness: 0.02, side: THREE.DoubleSide });
+    var m = new THREE.Mesh(g, mat);
+    m.name = p.name;
+    root.add(m); meshes.push(m);
+
+    if (!boxes[p.group]) {
+      var h = document.createElement("h2"); h.textContent = titles[p.group] || p.group;
+      var d = document.createElement("div");
+      document.getElementById("groups").appendChild(h);
+      document.getElementById("groups").appendChild(d);
+      boxes[p.group] = d;
+    }
+    var l = document.createElement("label"), c = document.createElement("input"), dot = document.createElement("i");
+    c.type = "checkbox"; c.checked = true;
+    c.onchange = function () { m.visible = c.checked; };
+    dot.style.background = p.color;
+    l.appendChild(c); l.appendChild(dot); l.appendChild(document.createTextNode(p.name));
+    boxes[p.group].appendChild(l);
+  });
+
+  var dist = 620;
+  var views = { front: [0, 0, 1], back: [0, 0, -1], left: [1, 0, 0], right: [-1, 0, 0] };
+  function view(n) {
+    var v = views[n];
+    camera.position.set(v[0] * dist, v[1] * dist, v[2] * dist);
+    controls.target.set(0, 0, 0);
+    controls.update();
+  }
+  [].forEach.call(document.querySelectorAll("[data-v]"), function (b) { b.onclick = function () { view(b.dataset.v); }; });
+  camera.position.set(dist * 0.75, dist * 0.1, dist * 0.65);
+  controls.update();
+
+  var ray = new THREE.Raycaster(), mouse = new THREE.Vector2(), tip = document.getElementById("tip"), hot = null;
+  renderer.domElement.addEventListener("pointermove", function (e) {
+    mouse.set(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1);
+    ray.setFromCamera(mouse, camera);
+    var hit = ray.intersectObjects(meshes.filter(function (m) { return m.visible; }))[0];
+    var m = hit && e.buttons === 0 ? hit.object : null;
+    if (hot && hot !== m) hot.material.emissive.setHex(0);
+    hot = m;
+    if (m) {
+      m.material.emissive.setHex(0x223344);
+      tip.textContent = m.name; tip.style.display = "block";
+      tip.style.left = e.clientX + 14 + "px"; tip.style.top = e.clientY + 10 + "px";
+    } else tip.style.display = "none";
+  });
+
+  addEventListener("resize", function () {
+    camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+  (function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+})();
+</script>
+</body>
+</html>
